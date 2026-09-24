@@ -13,6 +13,6 @@ export const s3Client = new S3Client({
 export const S3_BUCKET_NAME = process.env.S3_BUCKET_NAME as string;
 
 export function publicObjectUrl(key: string): string {
-  const endpoint = (process.env.S3_ENDPOINT as string).replace(/\/$/, "");
-  return `${endpoint}/${S3_BUCKET_NAME}/${key}`;
+  const base = (process.env.S3_PUBLIC_URL_BASE as string).replace(/\/$/, "");
+  return `${base}/${key}`;
 }

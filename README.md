@@ -54,7 +54,8 @@ npm install
 | `S3_ACCESS_KEY_ID` | Access key for the bucket |
 | `S3_SECRET_ACCESS_KEY` | Secret key for the bucket |
 | `S3_BUCKET_NAME` | Bucket name |
-| `S3_ENDPOINT` | S3-compatible endpoint URL (no trailing slash) |
+| `S3_ENDPOINT` | S3-compatible **API** endpoint URL, used for signing presigned upload URLs (no trailing slash) |
+| `S3_PUBLIC_URL_BASE` | **Public** base URL objects are read from in the browser (no trailing slash) — see below for why this is separate from `S3_ENDPOINT` |
 
 ### Sevalla
 
@@ -64,8 +65,16 @@ S3_REGION=auto
 S3_ACCESS_KEY_ID=<Sevalla R2-backed object storage access key>
 S3_SECRET_ACCESS_KEY=<Sevalla R2-backed object storage secret key>
 S3_BUCKET_NAME=<bucket name>
-S3_ENDPOINT=<Sevalla object storage endpoint>
+S3_ENDPOINT=<Sevalla object storage endpoint, e.g. https://<account-id>.r2.cloudflarestorage.com>
+S3_PUBLIC_URL_BASE=<Sevalla bucket's public CDN domain, e.g. https://<bucket-name>.sevalla.storage>
 ```
+
+The bucket must be created with public access enabled (Sevalla dashboard:
+Object Storage → bucket → enable public domain) to get the
+`S3_PUBLIC_URL_BASE` value. You'll also need a CORS policy on the bucket
+allowing `GET`/`PUT` from your app's domain — uploads happen as a direct
+browser → R2 request, and without CORS the browser's preflight is rejected
+before the upload ever starts.
 
 ### Vercel + Supabase
 
@@ -76,20 +85,28 @@ S3_ACCESS_KEY_ID=<Supabase S3-compatible access key>
 S3_SECRET_ACCESS_KEY=<Supabase S3-compatible secret key>
 S3_BUCKET_NAME=<bucket name>
 S3_ENDPOINT=<Supabase S3-compatible storage endpoint>
+S3_PUBLIC_URL_BASE=https://<project-ref>.supabase.co/storage/v1/object/public/<bucket-name>
 ```
+
+Make the bucket public in the Supabase dashboard (Storage → bucket →
+Public bucket), and add your app's domain to the bucket's CORS
+configuration for `GET`/`PUT` — same reasoning as Sevalla above.
 
 ## How image upload works
 
 1. Client calls `POST /api/upload-url` with `{ filename, contentType }`.
-2. Server returns a presigned `PUT` URL plus the object's final public URL
-   (`{S3_ENDPOINT}/{S3_BUCKET_NAME}/{key}`, path-style).
+2. Server returns a presigned `PUT` URL (signed against `S3_ENDPOINT`) plus
+   the object's public URL, built as `${S3_PUBLIC_URL_BASE}/<key>`.
 3. Client `PUT`s the file directly to the presigned URL, then creates the
-   todo with `image_url` set to the returned object URL.
+   todo with `image_url` set to the returned public URL.
 
-This assumes the bucket allows public read access and the endpoint supports
-path-style addressing (true for R2 and most S3-compatible providers). If
-your provider requires a separate public/CDN domain for reads, you'll need
-to adjust `publicObjectUrl` in `src/lib/s3.ts`.
+`S3_ENDPOINT` and `S3_PUBLIC_URL_BASE` are deliberately two different
+variables: neither Cloudflare R2 (Sevalla) nor Supabase Storage serve public
+reads from their raw S3 API endpoint — `GET`s against that endpoint require
+a signed request, confirmed by testing against a live Sevalla deployment
+(plain `GET`s on the S3-endpoint-based URL returned `400`). Each provider
+instead exposes a separate public/CDN domain for reads, which is what
+`S3_PUBLIC_URL_BASE` should point to.
 
 ## Latency instrumentation
 
@@ -100,17 +117,13 @@ response. The frontend shows the most recent value in the page footer
 
 ## Testing notes
 
-This build was verified locally via typecheck, production build, and dev
-server checks (see below), but **not** exercised against live Postgres or
-S3-compatible storage — no credentials were available in the environment
-this was built in. Before relying on it, run against real infra and verify:
-
-- `GET/POST /api/todos` and `PATCH/DELETE /api/todos/:id` against a real
-  database.
-- The full upload flow (`POST /api/upload-url` → `PUT` to the presigned URL
-  → todo creation) against a real bucket, and that the resulting
-  `image_url` is publicly readable.
-- That `dbMs` values look sane end-to-end.
+Verified end-to-end against a live Sevalla deployment: full `todos` CRUD
+against real Postgres (with real, sub-5ms `dbMs` values over the internal
+cluster network), and the full image upload flow (presigned `PUT` from a
+browser origin → object readable via `S3_PUBLIC_URL_BASE`). Not yet
+exercised against a Vercel + Supabase deployment — the env vars above
+should carry over directly, but confirm the CORS and public-bucket setup
+notes above when standing that side up.
 
 ## API routes
 
