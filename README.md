@@ -21,12 +21,19 @@ npm install
 
    ```bash
    psql "$DATABASE_URL" -f migrations/0001_init.sql
+   # or, using the app's own pg dependency:
+   npm run migrate
    ```
 
    Note: `gen_random_uuid()` requires the `pgcrypto` extension. The
    migration enables it (`create extension if not exists pgcrypto`), which
    requires a role with sufficient privileges — this is already enabled by
    default on Supabase and most managed Postgres providers.
+
+   On platforms where the database has no public endpoint (e.g. Sevalla's
+   managed Postgres, reachable only from inside the cluster), run
+   `npm run migrate` as a one-off job process instead of `psql` from your
+   local machine.
 
 2. Copy `.env.example` to `.env.local` and fill in your values.
 
